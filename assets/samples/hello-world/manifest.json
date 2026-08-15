@@ -1,0 +1,8 @@
+{
+  "id": "hello-world",
+  "name": "Hello, World",
+  "description": "Ask for your name and get a friendly greeting.",
+  "version": "1.0.0",
+  "icon": "icon.svg",
+  "entry": "index.html"
+}

@@ -66,6 +66,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _changeModel(String id) async {
+    await widget.settings.setModelId(id);
+    await widget.llm.setModelId(id);
+    if (mounted) {
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Model set to $id.')),
+      );
+    }
+  }
+
   Future<void> _pickFolder() async {
     final controller = TextEditingController(text: _folderPath ?? '');
     final value = await showDialog<String>(
@@ -144,6 +155,58 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       onPressed: _saveKey,
                       child: const Text('Save key'),
                     ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Divider(),
+                  Text('Model', style: Theme.of(context).textTheme.titleSmall),
+                  const SizedBox(height: 4),
+                  DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      isExpanded: true,
+                      value: widget.settings.modelId,
+                      items: [
+                        for (final id in LlmService.availableModelIds)
+                          DropdownMenuItem<String>(
+                            value: id,
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    id,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  LlmService.isModelCached(id)
+                                      ? 'ready on device'
+                                      : 'cloud / download',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodySmall
+                                      ?.copyWith(
+                                        color: LlmService.isModelCached(id)
+                                            ? Theme.of(context)
+                                                .colorScheme
+                                                .primary
+                                            : Theme.of(context)
+                                                .colorScheme
+                                                .outline,
+                                      ),
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
+                      onChanged: (id) => id == null ? null : _changeModel(id),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Smaller cached models run instantly on this machine. '
+                    'Bigger models download once (progress shows in the '
+                    'Studio) or are served from the cloud while downloading.',
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
               ),

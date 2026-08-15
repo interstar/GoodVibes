@@ -72,9 +72,12 @@ class _HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<_HomeShell> {
   int _index = 0;
+  String? _editTargetId;
 
   @override
   Widget build(BuildContext context) {
+    final editTarget =
+        _editTargetId == null ? null : widget.catalog.byId(_editTargetId!);
     return Scaffold(
       body: IndexedStack(
         index: _index,
@@ -83,12 +86,19 @@ class _HomeShellState extends State<_HomeShell> {
             catalog: widget.catalog,
             server: widget.server,
             settings: widget.settings,
+            onEdit: (app) => setState(() {
+              _editTargetId = app.manifest.id;
+              _index = 1;
+            }),
           ),
           VibeScreen(
             catalog: widget.catalog,
             llm: widget.llm,
             settings: widget.settings,
             server: widget.server,
+            editTarget: editTarget,
+            onEditTargetChanged: (app) =>
+                setState(() => _editTargetId = app?.manifest.id),
           ),
           SettingsScreen(settings: widget.settings, llm: widget.llm),
         ],

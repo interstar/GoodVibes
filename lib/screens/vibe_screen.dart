@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:xybrid_flutter/xybrid_flutter.dart';
 
@@ -19,12 +21,18 @@ class _ChatMessage {
   _ChatMessage({required this.fromUser, required this.text});
 }
 
-/// The Vibe Studio: chat with the LLM to generate new apps.
+/// The Vibe Studio: chat with the LLM to generate new apps, or edit an
+/// existing app in place.
 class VibeScreen extends StatefulWidget {
   final AppCatalog catalog;
   final LlmService llm;
   final SettingsService settings;
   final LocalServer server;
+
+  /// When set, the Studio edits this app: its files are sent along and the
+  /// result replaces the app in place.
+  final InstalledApp? editTarget;
+  final ValueChanged<InstalledApp?>? onEditTargetChanged;
 
   const VibeScreen({
     super.key,
@@ -32,6 +40,8 @@ class VibeScreen extends StatefulWidget {
     required this.llm,
     required this.settings,
     required this.server,
+    this.editTarget,
+    this.onEditTargetChanged,
   });
 
   @override
@@ -50,6 +60,30 @@ class _VibeScreenState extends State<VibeScreen> {
   String _streamingText = '';
   CancellationToken? _cancel;
   String? _status;
+  InstalledApp? _editTarget;
+
+  @override
+  void initState() {
+    super.initState();
+    _editTarget = widget.editTarget;
+  }
+
+  @override
+  void didUpdateWidget(VibeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final oldId = oldWidget.editTarget?.manifest.id;
+    final newId = widget.editTarget?.manifest.id;
+    if (oldId != newId) {
+      if (widget.editTarget != null) {
+        // A new app was picked for editing: drop any reference app / prior
+        // conversation context.
+        _referenceAppId = null;
+        _context = null;
+      }
+      // Keep the local copy fresh (e.g. after a catalog refresh).
+      setState(() => _editTarget = widget.editTarget);
+    }
+  }
 
   @override
   void dispose() {
@@ -94,9 +128,12 @@ class _VibeScreenState extends State<VibeScreen> {
     try {
       final system = await AppGenerator.buildSystemPrompt(
         installedApps: widget.catalog.apps,
-        referenceApp: _referenceAppId == null
-            ? null
-            : widget.catalog.byId(_referenceAppId!),
+        referenceApp: _editTarget == null
+            ? (_referenceAppId == null
+                ? null
+                : widget.catalog.byId(_referenceAppId!))
+            : null,
+        editApp: _editTarget,
       );
       if (!context.hasSystem) {
         context.setSystem(system);
@@ -157,16 +194,28 @@ class _VibeScreenState extends State<VibeScreen> {
       try {
         final generated = AppGenerator.parse(fullText);
         final appsDir = await widget.settings.appsDir();
+        final target = _editTarget;
         final installed = await AppGenerator.write(
           appsDir: appsDir,
           app: generated,
+          overrideId: target?.manifest.id,
+          keepUnmentionedFiles: target != null,
         );
         await widget.catalog.refresh();
         parsed = _ChatMessage(fromUser: false, text: fullText)
           ..installedApp = installed;
+        final missing = AppGenerator.findMissingReferences(
+          generated,
+          existingDir: target == null ? null : Directory(target.dir),
+        );
         setState(() {
-          _status =
-              'Created "${generated.name}" — tap Open to run it right away.';
+          _status = target == null
+              ? 'Created "${generated.name}" — tap Open to run it right away.'
+              : 'Updated "${target.manifest.name}" — tap Open to see the changes.';
+          if (missing.isNotEmpty) {
+            _status = '${_status!}\nWarning: ${missing.map((f) => '"$f"').join(', ')} '
+                'is referenced but was not generated.';
+          }
         });
       } on GenerateParseException catch (e) {
         setState(() {
@@ -256,7 +305,7 @@ class _VibeScreenState extends State<VibeScreen> {
       ),
       body: Column(
         children: [
-          _referenceBar(context),
+          if (_editTarget != null) _editBanner(context) else _referenceBar(context),
           const Divider(height: 1),
           Expanded(
             child: _messages.isEmpty && _streamingText.isEmpty
@@ -336,6 +385,41 @@ class _VibeScreenState extends State<VibeScreen> {
     );
   }
 
+  Widget _editBanner(BuildContext context) {
+    final theme = Theme.of(context);
+    final target = _editTarget!;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+      child: Row(
+        children: [
+          Icon(Icons.edit_outlined,
+              size: 18, color: theme.colorScheme.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text.rich(
+              TextSpan(children: [
+                TextSpan(
+                  text: 'Editing "${target.manifest.name}"',
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(fontWeight: FontWeight.w600),
+                ),
+                const TextSpan(
+                    text: ' — describe a change; it will replace the app.'),
+              ]),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Stop editing',
+            icon: const Icon(Icons.close),
+            onPressed: _streaming
+                ? null
+                : () => widget.onEditTargetChanged?.call(null),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _referenceBar(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -402,11 +486,13 @@ class _VibeScreenState extends State<VibeScreen> {
                 enabled: !_streaming,
                 minLines: 1,
                 maxLines: 4,
-                decoration: const InputDecoration(
-                  hintText: 'Describe an app to build…',
-                  border: OutlineInputBorder(),
-                  contentPadding:
-                      EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: InputDecoration(
+                  hintText: _editTarget == null
+                      ? 'Describe an app to build…'
+                      : 'Describe what to add or change…',
+                  border: const OutlineInputBorder(),
+                  contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 12),
                 ),
                 onSubmitted: (_) => _send(),
               ),

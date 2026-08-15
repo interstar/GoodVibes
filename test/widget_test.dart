@@ -83,6 +83,19 @@ void main() {
       expect(app.files['index.html'], contains('<body>'));
     });
 
+    test('rescues a truncated <app> block with no closing tag', () {
+      final text = '<app>\n'
+          'id: timer\n'
+          'name: Timer\n'
+          'description: a\n'
+          '=== FILE: index.html ===\n'
+          '<!DOCTYPE html>\n'
+          '<html><body>hi</body></html>';
+      final app = AppGenerator.parse(text);
+      expect(app.id, 'timer');
+      expect(app.files['index.html'], contains('</body></html>'));
+    });
+
     test('rejects an invalid id', () {
       expect(
         () => AppGenerator.parse('{"id":"Bad ID","name":"x","files":'
@@ -239,6 +252,35 @@ void main() {
         AppGenerator.findMissingReferences(app, existingDir: temp),
         isEmpty,
       );
+    });
+  });
+
+  group('AppGenerator default helpers', () {
+    test('spec embeds the default template', () {
+      expect(AppGenerator.appStructureSpec, contains('### Default template'));
+      expect(AppGenerator.appStructureSpec,
+          contains(AppGenerator.defaultTemplate));
+    });
+
+    test('default template wires up Tailwind, Inter and the store helper', () {
+      final t = AppGenerator.defaultTemplate;
+      expect(t, contains('cdn.tailwindcss.com'));
+      expect(t, contains('@theme'));
+      expect(t, contains('--font-sans'));
+      expect(t, contains('fonts.googleapis.com'));
+      expect(t, contains('family=Inter'));
+      expect(t, contains('const store'));
+      expect(t, contains('localStorage.getItem'));
+      expect(t, contains('localStorage.setItem'));
+      expect(t, contains('BUILD YOUR APP INSIDE <main>'));
+    });
+
+    test('spec no longer forbids CDNs, remote fonts or localStorage', () {
+      final spec = AppGenerator.appStructureSpec;
+      expect(spec, isNot(contains('no external CDNs')));
+      expect(spec, isNot(contains('Do not use localStorage')));
+      expect(spec, contains('store.get'));
+      expect(spec, contains('Tailwind utility classes'));
     });
   });
 }

@@ -35,6 +35,42 @@ class GenerateParseException implements Exception {
 /// Knows the app structure, builds the system prompt for the LLM, parses its
 /// output, and writes the generated app into the user's apps directory.
 class AppGenerator {
+  /// The default starting point for every generated app: Tailwind for
+  /// styling, the Inter Google Font, and a small localStorage-backed helper
+  /// for persistence. The model is told to keep the `<head>` and the `store`
+  /// helper intact and build inside `<main>`.
+  static const String defaultTemplate = '''
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your App</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style type="text/tailwindcss">
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script>
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (_) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} },
+  del(k) { localStorage.removeItem(k); }
+};
+</script>
+</head>
+<body class="min-h-screen bg-slate-50 text-slate-900 antialiased dark:bg-slate-900 dark:text-slate-100">
+<main id="app" class="mx-auto w-full max-w-2xl p-6">
+  <!-- BUILD YOUR APP INSIDE <main> -->
+</main>
+</body>
+</html>
+''';
+
   /// The contract that tells the LLM what a Good Vibes app is. Also shown in
   /// the Vibe Studio UI so users understand what will be built.
   static const String appStructureSpec = '''
@@ -58,14 +94,20 @@ It is created from a folder containing:
 }
 
 ### Rules for good apps
-- Everything must be self-contained: no external CDNs, no network requests,
-  no remote fonts or images. Inline CSS and JS in index.html is fine.
+- Start from the Default template at the end of this spec. Keep its <head>
+  (Tailwind CDN, Inter font, @theme block) and its store helper exactly as
+  they are; replace the title and build your app inside <main>.
+- Style everything with Tailwind utility classes (e.g. p-4, text-xl,
+  bg-blue-500, rounded-xl). Avoid writing custom CSS unless you truly need it.
+- Use dark: variants (e.g. dark:bg-slate-900) so the app supports dark mode.
+- Persist small amounts of app state with the store helper (store.get /
+  store.set / store.del, backed by localStorage) so it survives a restart.
+  Prefix storage keys with the app id. Never store large or sensitive data.
 - Use relative paths for any local assets.
 - It must run correctly when index.html is opened in a browser.
 - Give it a nice, cohesive look: a pleasant layout, sane fonts and colors,
   and support for light/dark color schemes where reasonable.
 - Keep it simple and single-purpose. One screen is fine.
-- Do not use localStorage (the browser may clear it); keep state in memory.
 
 ### Output format
 
@@ -98,6 +140,14 @@ Rules:
 - Never truncate or elide a file - write every file completely.
 - The "id" must be a kebab-case slug unique to this app. If the user asks for
   something similar to an existing app, pick a distinct id.
+
+### Default template
+
+Every new app starts from this template. Copy it in full as index.html, then
+replace the <title>, remove the placeholder comment, and build the app inside
+<main>. Do not remove or alter the Tailwind, font, or store helper parts.
+
+$defaultTemplate
 ''';
 
   /// Build the system prompt: the app structure plus the currently installed
@@ -280,11 +330,22 @@ Rules:
   }
 
   /// Parse the `<app>...</app>` fenced-file format.
+  ///
+  /// Tolerates a truncated reply where the model starts an `<app>` block but
+  /// stops before writing the closing `</app>` (common with small models) - in
+  /// that case everything from `<app>` to the end of the text is used.
   static GeneratedApp? _tryAppBlock(String text) {
-    final match =
+    final closed =
         RegExp(r'<app>([\s\S]*?)</app>', caseSensitive: false).firstMatch(text);
-    if (match == null) return null;
-    final body = match.group(1)!;
+    String body;
+    if (closed != null) {
+      body = closed.group(1)!;
+    } else {
+      final open =
+          RegExp(r'<app>([\s\S]*)', caseSensitive: false).firstMatch(text);
+      if (open == null) return null;
+      body = open.group(1)!;
+    }
 
     final fileMarker = RegExp(
       r'^=== FILE:\s*(.+?)\s*===\s*$',

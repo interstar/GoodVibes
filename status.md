@@ -56,21 +56,31 @@ Each app is a folder containing:
 - `manifest.json` — `{ "id", "name", "description", "version", "icon"?, "entry" }`
 - `index.html` — the self-contained entry point (optional `styles.css`, `script.js`, assets)
 
-Rules in the system prompt: fully self-contained (no CDNs/network), relative paths,
-offline-friendly, single-purpose, light/dark-friendly where sensible.
+Rules in the system prompt: start from the **Default template** (see below), style with
+Tailwind utility classes, support light/dark, persist small state via a localStorage helper,
+use relative paths for local assets, single-purpose.
 
-The LLM must reply with a single `` ```json `` block:
+The LLM replies with a line-oriented fenced-file format (see "Design change" below), which
+the app parses, validates (slug + index.html), writes as files + manifest, and shows in the
+store.
 
-```json
-{
-  "id": "kebab-case-slug",
-  "name": "Human name",
-  "description": "Short summary",
-  "files": { "index.html": "...", "styles.css": "..." }
-}
-```
+### Default helpers (per generated app)
 
-The app parses this, validates the slug, writes the files + manifest, and refreshes the store.
+Every new app starts from a `defaultTemplate` embedded in `appStructureSpec`:
+
+- **Tailwind** via the Play CDN (`https://cdn.tailwindcss.com`) + an `@theme` block that sets
+  `--font-sans` to Inter.
+- **Inter** Google Font (preconnect + css2 link).
+- **`store` localStorage helper** (`store.get / set / del`, JSON + try/catch guarded) in
+  `<head>` so it survives small-model output truncation.
+- A scaffolded `<main id="app">` with light/dark `bg`/`text` classes; the model builds inside
+  it. The `store` helper lives in `<head>` because llama-3.2-1b truncates at ~2.9k chars and
+  drops whatever is last in the body.
+- The parser now **tolerates an unclosed `<app>` block** (treats the rest of the text as the
+  app body), since the small model sometimes stops before writing `</app>`.
+
+Note: Tailwind + Inter load from CDNs, so generated apps need internet at runtime (accepted
+tradeoff; can be vendored later via the local server without changing the model contract).
 
 ## Progress
 
@@ -92,7 +102,8 @@ The app parses this, validates the slug, writes the files + manifest, and refres
 ### What works
 
 - `flutter analyze` — **0 issues**
-- `flutter test` — **8/8 passing** (AppGenerator parsing for both output formats)
+- `flutter test` — **20/20 passing** (parse formats, write modes, buildSystemPrompt, missing
+  references, and the default-helpers template/rules)
 - `flutter build linux --debug` — **builds successfully**
 - App launches on Linux; first-run seeding creates `~/GoodVibes/apps/hello-world/`
 - **Local HTTP server verified live**: `index.html`, `icon.svg`, `manifest.json` all serve
@@ -108,6 +119,13 @@ The app parses this, validates the slug, writes the files + manifest, and refres
   `icon.svg` preserved). `flutter test integration_test/edit_live_test.dart -d linux`
 - **Vibe Studio now shows model-download progress** ("Downloading model… 45%") instead of a
   silent wait on first on-device use.
+- **Default helpers live e2e passed**: with the new template in the system prompt,
+  `llm_live_test.dart` generated + installed a `pomodoro-timer` (index.html + styles.css +
+  script.js) that kept the Tailwind CDN, Inter font, and `store` helper. Exercise with:
+  `flutter test integration_test/llm_live_test.dart -d linux`
+- **Phil's fork merged** (PRs #3 and #4): window-closing fix on Linux (`titleBarHeight: 0`
+  for Linux) and `desktop_webview_window` **vendored** into `vendor/` as a path dependency
+  (pub.dev version was unstable). `analyze` clean, 20/20 tests pass after the merge.
 
 ### Diagnosed: cloud gateway hang (Aug 15)
 

@@ -4,10 +4,13 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Small persisted settings (Xybrid API key, apps folder override).
+import 'llm_service.dart';
+
+/// Small persisted settings (Xybrid API key, model id, apps folder override).
 class SettingsService {
   static const _keyApiKey = 'xybrid_api_key';
   static const _keyAppsDir = 'apps_dir';
+  static const _keyModelId = 'model_id';
 
   late SharedPreferences _prefs;
 
@@ -24,6 +27,12 @@ class SettingsService {
     } else {
       await _prefs.setString(_keyApiKey, trimmed);
     }
+  }
+
+  String get modelId => _prefs.getString(_keyModelId) ?? LlmService.defaultModelId;
+
+  Future<void> setModelId(String value) async {
+    await _prefs.setString(_keyModelId, value);
   }
 
   /// The directory that holds app folders (`~/GoodVibes/apps` by default).

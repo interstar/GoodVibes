@@ -103,8 +103,42 @@ The app parses this, validates the slug, writes the files + manifest, and refres
   app parsed and installed to disk (`pomodoro-timer` with `manifest.json`/`index.html`/
   `styles.css`). Exercise with:
   `flutter test integration_test/llm_live_test.dart -d linux`
+- **Live edit (reprompt) e2e passed**: seeded a `counter` app on disk, asked the model to
+  "add a reset button", and verified it updated `index.html` **in place** (same id,
+  `icon.svg` preserved). `flutter test integration_test/edit_live_test.dart -d linux`
 - **Vibe Studio now shows model-download progress** ("Downloading model… 45%") instead of a
   silent wait on first on-device use.
+
+### Diagnosed: cloud gateway hang (Aug 15)
+
+- With a valid stored API key, `Xybrid` engages speculation correctly
+  (`willSpeculate = true`) and `Xybrid.isModelCached` / key plumbing all check out.
+- **The Xybrid cloud chat endpoint itself hangs**: `POST api.xybrid.dev/v1/chat/completions`
+  completes TLS, sends the request, and receives zero bytes (verified with curl, 30 s
+  timeout). `GET /v1/models` returns 200 with the same key, so the key is valid — this is
+  server-side, not an app or key problem.
+- Result: with speculation on, generation would wait forever. Fixes added to the app so it
+  never silently hangs:
+  - **Model picker in Settings** (`qwen3.5-2b` default; `llama-3.2-1b`, `gemma-3-1b`,
+    `smollm2-360m`) with a "ready on device" badge from `Xybrid.isModelCached`. Selection is
+    persisted (`model_id`) and applied at startup.
+  - **First-token timeout (45 s)** in `streamChat`: if no token arrives, the stream is
+    aborted and a friendly `FirstTokenTimeoutException` is shown instead of an infinite
+    "Loading…". On-device cached models are unaffected.
+- Workaround in effect: the local model is set to `llama-3.2-1b` (cached, instant). The
+  qwen3.5-2b download keeps restarting server-side; use the Settings picker to switch once
+  the cloud is healthy.
+
+### Edit mode (reprompt an existing app)
+
+- Store → app menu (⋯) → **Edit** jumps to the Studio with the app as the edit target.
+- The Studio shows an "Editing «name»" banner; the app's current files (minus
+  `manifest.json`) are embedded in the system prompt as `<app-source>`.
+- The prompt forces the same id, requires the **complete** updated files (no diffs), and
+  says any referenced file must be emitted (or inlined).
+- On success the app is replaced **in place**: generated files overwrite, unmentioned files
+  are kept, and the status line warns about any `src`/`href`/`url()` reference that wasn't
+  written (e.g. a dead `script.js` link), so broken output is visible instead of silent.
 
 ### Design change made during verification
 

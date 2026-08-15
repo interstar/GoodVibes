@@ -102,10 +102,12 @@ Rules:
 
   /// Build the system prompt: the app structure plus the currently installed
   /// apps (so the model knows what exists), optionally including a reference
-  /// app's source as a style/structure exemplar.
+  /// app's source as a style/structure exemplar, or the source of the app being
+  /// edited ([editApp]).
   static Future<String> buildSystemPrompt({
     List<InstalledApp> installedApps = const [],
     InstalledApp? referenceApp,
+    InstalledApp? editApp,
   }) async {
     final buffer = StringBuffer()
       ..writeln('You are the Good Vibes app builder. You turn a user\'s casual '
@@ -130,7 +132,31 @@ Rules:
       }
     }
 
-    if (referenceApp != null) {
+    if (editApp != null) {
+      buffer
+        ..writeln()
+        ..writeln('## Task: edit the existing app "${editApp.manifest.name}"')
+        ..writeln('The user wants you to MODIFY this app in place. Here are '
+            'its current files:')
+        ..writeln()
+        ..writeln('<app-source>')
+        ..writeln(await _readAppFiles(editApp))
+        ..writeln('</app-source>')
+        ..writeln()
+        ..writeln('Apply the user\'s requested changes: add the requested '
+            'functionality while keeping everything else working.')
+        ..writeln('Rules:')
+        ..writeln('- The id MUST stay "${editApp.manifest.id}".')
+        ..writeln('- Output the COMPLETE updated files in the <app> block - '
+            'not diffs, not fragments.')
+        ..writeln('- If the user added functionality, make sure it is fully '
+            'wired up (buttons, handlers, etc.).')
+        ..writeln('- If your code references another file (e.g. script.js, '
+            'styles.css) via src/href, you MUST also output it as its own '
+            '=== FILE: ... === block. Otherwise inline the code directly.')
+        ..writeln('- You may add new files, but keep every existing file\'s '
+            'purpose intact.');
+    } else if (referenceApp != null) {
       buffer
         ..writeln()
         ..writeln('## Reference app: ${referenceApp.manifest.name}')
@@ -146,8 +172,8 @@ Rules:
 
     buffer
       ..writeln()
-      ..writeln('Remember: reply with only the ```json code block described '
-          'above. Do not add commentary outside the code block.');
+      ..writeln('Remember: reply with only the <app>...</app> block described '
+          'above. Do not add commentary inside the block.');
 
     return buffer.toString();
   }
@@ -156,6 +182,25 @@ Rules:
     final file = File(app.entryPath);
     if (!await file.exists()) return '(entry file missing)';
     return file.readAsString();
+  }
+
+  /// Read all of an app's source files (skipping its manifest) for embedding
+  /// in the prompt.
+  static Future<String> _readAppFiles(InstalledApp app) async {
+    final dir = Directory(app.dir);
+    if (!await dir.exists()) return '(app folder missing)';
+
+    final buffer = StringBuffer();
+    await for (final entity in dir.list(followLinks: false)) {
+      if (entity is! File) continue;
+      final name = p.relative(entity.path, from: app.dir);
+      if (name == 'manifest.json') continue;
+      buffer
+        ..writeln('=== FILE: $name ===')
+        ..writeln(await entity.readAsString())
+        ..writeln();
+    }
+    return buffer.toString().trim();
   }
 
   static final _slugRe = RegExp(r'^[a-z0-9]+(-[a-z0-9]+)*$');
@@ -333,11 +378,23 @@ Rules:
 
   /// Write the generated app into `appsDir/<id>`, overwriting an existing app
   /// with the same id. Returns the installed app.
+  ///
+  /// When [overrideId] is given, the app is written to `appsDir/<overrideId>`
+  /// regardless of the generated id (used when editing an existing app in
+  /// place). When [keepUnmentionedFiles] is true, files already on disk that
+  /// are not part of the generated set are left untouched (also used for
+  /// edits, so the model doesn't have to re-emit unchanged assets).
   static Future<InstalledApp> write({
     required Directory appsDir,
     required GeneratedApp app,
+    String? overrideId,
+    bool keepUnmentionedFiles = false,
   }) async {
-    final dir = Directory(p.join(appsDir.path, app.id));
+    final id = overrideId ?? app.id;
+    final dir = Directory(p.join(appsDir.path, id));
+    if (await dir.exists() && !keepUnmentionedFiles) {
+      await dir.delete(recursive: true);
+    }
     await dir.create(recursive: true);
 
     for (final entry in app.files.entries) {
@@ -347,7 +404,7 @@ Rules:
     }
 
     final manifest = AppManifest(
-      id: app.id,
+      id: id,
       name: app.name,
       description: app.description,
       version: '1.0.0',
@@ -355,5 +412,43 @@ Rules:
     );
     await File(p.join(dir.path, 'manifest.json')).writeAsString(manifest.encode());
     return InstalledApp(manifest: manifest, dir: dir.path);
+  }
+
+  /// Scan the generated files for `src`/`href`/`url()` references to relative
+  /// files that were neither emitted by the model nor already present in
+  /// [existingDir] (used when editing). Returns the missing paths so the UI can
+  /// warn instead of shipping silently broken links.
+  static List<String> findMissingReferences(
+    GeneratedApp app, {
+    Directory? existingDir,
+  }) {
+    final emitted = app.files.keys.toSet();
+    final refRe = RegExp(
+      r'''(?:src|href)\s*=\s*["']([^"'#][^"']*)["']|url\(\s*["']?([^"')#][^"')]*)["']?\)''',
+      caseSensitive: false,
+    );
+
+    final missing = <String>{};
+    for (final content in app.files.values) {
+      for (final m in refRe.allMatches(content)) {
+        var ref = m.group(1) ?? m.group(2) ?? '';
+        ref = ref.trim().replaceAll('\\', '/');
+        if (ref.isEmpty ||
+            ref.startsWith('http:') ||
+            ref.startsWith('https:') ||
+            ref.startsWith('//') ||
+            ref.startsWith('data:') ||
+            ref.startsWith('mailto:')) {
+          continue;
+        }
+        if (emitted.contains(ref)) continue;
+        if (existingDir != null &&
+            File(p.join(existingDir.path, ref)).existsSync()) {
+          continue;
+        }
+        missing.add(ref);
+      }
+    }
+    return missing.toList()..sort();
   }
 }

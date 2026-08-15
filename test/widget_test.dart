@@ -1,5 +1,9 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:good_vibes/models/app_manifest.dart';
+import 'package:good_vibes/services/app_catalog.dart';
 import 'package:good_vibes/services/app_generator.dart';
 
 void main() {
@@ -104,6 +108,136 @@ void main() {
       expect(
         () => AppGenerator.parse('Sorry, I could not build that.'),
         throwsA(isA<GenerateParseException>()),
+      );
+    });
+  });
+
+  group('AppGenerator.write', () {
+    late Directory temp;
+
+    setUp(() async {
+      temp = await Directory.systemTemp.createTemp('gv_test_');
+    });
+
+    tearDown(() async {
+      await temp.delete(recursive: true);
+    });
+
+    GeneratedApp generated(String id) => GeneratedApp(
+          id: id,
+          name: 'Test App',
+          description: 'desc',
+          files: {'index.html': '<html>new</html>'},
+        );
+
+    test('writes into the generated id by default', () async {
+      final app = await AppGenerator.write(appsDir: temp, app: generated('alpha'));
+      expect(app.manifest.id, 'alpha');
+      expect(app.dir, endsWith('/alpha'));
+      expect(File('${app.dir}/index.html').readAsStringSync(),
+          '<html>new</html>');
+    });
+
+    test('overrideId forces the target folder and manifest id', () async {
+      final app = await AppGenerator.write(
+        appsDir: temp,
+        app: generated('renamed-elsewhere'),
+        overrideId: 'existing-app',
+      );
+      expect(app.manifest.id, 'existing-app');
+      expect(File('${app.dir}/manifest.json').readAsStringSync(),
+          contains('"id": "existing-app"'));
+    });
+
+    test('keepUnmentionedFiles preserves untouched files', () async {
+      final existing = Directory('${temp.path}/beta');
+      await existing.create(recursive: true);
+      File('${existing.path}/icon.svg').writeAsStringSync('<svg/>');
+
+      final app = await AppGenerator.write(
+        appsDir: temp,
+        app: generated('beta'),
+        overrideId: 'beta',
+        keepUnmentionedFiles: true,
+      );
+      expect(File('${app.dir}/icon.svg').existsSync(), isTrue);
+      expect(File('${app.dir}/index.html').readAsStringSync(),
+          '<html>new</html>');
+    });
+
+    test('without keepUnmentionedFiles a stale folder is wiped', () async {
+      final existing = Directory('${temp.path}/gamma');
+      await existing.create(recursive: true);
+      File('${existing.path}/old.js').writeAsStringSync('leftover');
+
+      final app = await AppGenerator.write(appsDir: temp, app: generated('gamma'));
+      expect(File('${app.dir}/old.js').existsSync(), isFalse);
+      expect(File('${app.dir}/index.html').existsSync(), isTrue);
+    });
+  });
+
+  group('AppGenerator.buildSystemPrompt', () {
+    final installed = InstalledApp(
+      manifest: const AppManifest(
+        id: 'hello-world',
+        name: 'Hello World',
+        description: 'Greeter',
+        version: '1.0.0',
+      ),
+      dir: '/nope/hello-world',
+    );
+
+    test('edit mode instructs the model to keep the id and include source',
+        () async {
+      final prompt = await AppGenerator.buildSystemPrompt(editApp: installed);
+      expect(prompt, contains('Task: edit the existing app'));
+      expect(prompt, contains('The id MUST stay "hello-world"'));
+      expect(prompt, contains('Output the COMPLETE updated files'));
+    });
+
+    test('edit mode ignores the reference app', () async {
+      final prompt = await AppGenerator.buildSystemPrompt(
+        referenceApp: installed,
+        editApp: installed,
+      );
+      expect(prompt, contains('Task: edit the existing app'));
+      expect(prompt, isNot(contains('Reference app:')));
+    });
+  });
+
+  group('AppGenerator.findMissingReferences', () {
+    test('flags referenced files that were not emitted', () {
+      final app = GeneratedApp(
+        id: 'x',
+        name: 'X',
+        description: '',
+        files: {
+          'index.html':
+              '<script src="app.js"></script><link href="styles.css" rel="stylesheet">',
+        },
+      );
+      expect(AppGenerator.findMissingReferences(app), ['app.js', 'styles.css']);
+    });
+
+    test('ignores emitted files, urls, anchors and existing files', () async {
+      final temp = await Directory.systemTemp.createTemp('gv_miss_');
+      File('${temp.path}/styles.css').writeAsStringSync('body{}');
+      addTearDown(() => temp.delete(recursive: true));
+
+      final app = GeneratedApp(
+        id: 'x',
+        name: 'X',
+        description: '',
+        files: {
+          'index.html':
+              '<script src="app.js"></script><link href="styles.css" '
+              'rel="stylesheet"><a href="#sec">x</a><a href="https://a.b/c">y</a>',
+          'app.js': 'console.log(1)',
+        },
+      );
+      expect(
+        AppGenerator.findMissingReferences(app, existingDir: temp),
+        isEmpty,
       );
     });
   });

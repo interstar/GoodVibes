@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:desktop_webview_window/desktop_webview_window.dart';
 import 'package:flutter/material.dart';
 
@@ -19,13 +21,14 @@ Future<void> main(List<String> args) async {
   final settings = SettingsService();
   await settings.init();
 
-  final llm = LlmService();
-  try {
-    await llm.init(apiKey: settings.apiKey);
-  } catch (e) {
-    // The rest of the app still works; generation will surface this error.
-    debugPrint('Xybrid init failed: $e');
-  }
+  final llm = LlmService(modelId: settings.modelId, apiKey: settings.apiKey);
+  // Xybrid.init can perform network I/O (telemetry/registry) that must never
+  // block the window from appearing. It is awaited lazily on first use, with
+  // a timeout inside the service so a hung handshake surfaces an error
+  // instead of an invisible app.
+  unawaited(llm.init().catchError((Object e) {
+    debugPrint('Xybrid init failed (will retry on next use): $e');
+  }));
 
   final catalog = AppCatalog(settings);
   await catalog.init();

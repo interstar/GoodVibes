@@ -12,11 +12,16 @@ class StoreScreen extends StatelessWidget {
   final LocalServer server;
   final SettingsService settings;
 
+  /// Called when the user picks "Edit" on an app; the shell switches to the
+  /// Studio with that app as the edit target.
+  final ValueChanged<InstalledApp>? onEdit;
+
   const StoreScreen({
     super.key,
     required this.catalog,
     required this.server,
     required this.settings,
+    this.onEdit,
   });
 
   Future<void> _open(BuildContext context, InstalledApp app) async {
@@ -117,6 +122,7 @@ class StoreScreen extends StatelessWidget {
                 app: app,
                 server: server,
                 onOpen: () => _open(context, app),
+                onEdit: () => onEdit?.call(app),
                 onDelete: () => _confirmDelete(context, app),
               );
             },
@@ -131,12 +137,14 @@ class _AppCard extends StatelessWidget {
   final InstalledApp app;
   final LocalServer server;
   final VoidCallback onOpen;
+  final VoidCallback onEdit;
   final VoidCallback onDelete;
 
   const _AppCard({
     required this.app,
     required this.server,
     required this.onOpen,
+    required this.onEdit,
     required this.onDelete,
   });
 
@@ -170,10 +178,26 @@ class _AppCard extends StatelessWidget {
                   ),
                   PopupMenuButton<String>(
                     onSelected: (value) {
+                      if (value == 'edit') onEdit();
                       if (value == 'delete') onDelete();
                     },
                     itemBuilder: (ctx) => const [
-                      PopupMenuItem(value: 'delete', child: Text('Delete')),
+                      PopupMenuItem(
+                        value: 'edit',
+                        child: ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.edit_outlined),
+                          title: Text('Edit'),
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'delete',
+                        child: ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.delete_outline),
+                          title: Text('Delete'),
+                        ),
+                      ),
                     ],
                   ),
                 ],

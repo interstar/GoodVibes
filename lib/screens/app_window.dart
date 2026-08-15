@@ -17,7 +17,7 @@ Future<void> openAppInBrowser({
       windowWidth: 1100,
       windowHeight: 800,
       title: title,
-      titleBarHeight: 44,
+      titleBarHeight: Platform.isLinux ? 0 : 44,
       titleBarTopPadding: Platform.isMacOS ? 24 : 0,
     ),
   );

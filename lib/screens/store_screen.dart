@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/app_catalog.dart';
+import '../services/app_chat_store.dart';
 import '../services/local_server.dart';
 import '../services/settings_service.dart';
 import 'app_window.dart';
@@ -14,7 +15,8 @@ class StoreScreen extends StatelessWidget {
 
   /// Called when the user picks "Edit" on an app; the shell switches to the
   /// Studio with that app as the edit target.
-  final ValueChanged<InstalledApp>? onEdit;
+  final void Function(InstalledApp app, {required bool loadTranscript})? onEdit;
+  final VoidCallback? onNewApp;
 
   const StoreScreen({
     super.key,
@@ -22,6 +24,7 @@ class StoreScreen extends StatelessWidget {
     required this.server,
     required this.settings,
     this.onEdit,
+    this.onNewApp,
   });
 
   Future<void> _open(BuildContext context, InstalledApp app) async {
@@ -37,13 +40,77 @@ class StoreScreen extends StatelessWidget {
     }
   }
 
+  Future<void> _debug(BuildContext context, InstalledApp app) async {
+    final url = server.urlForApp(app.manifest.id);
+    try {
+      await openAppInDebugBrowser(url: url, title: app.manifest.name);
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not debug "${app.manifest.name}": $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _openInSystemBrowser(
+    BuildContext context,
+    InstalledApp app,
+  ) async {
+    final url = server.urlForApp(app.manifest.id);
+    try {
+      await openAppInSystemBrowser(url: url);
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Could not open "${app.manifest.name}" in browser: $e',
+            ),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _edit(BuildContext context, InstalledApp app) async {
+    var loadTranscript = false;
+    if (await AppChatStore.hasTranscript(app)) {
+      if (!context.mounted) return;
+      final choice = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('Edit ${app.manifest.name}'),
+          content: const Text(
+            'Reload the previous chat transcript for this app?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Start fresh'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Reload transcript'),
+            ),
+          ],
+        ),
+      );
+      if (choice == null) return;
+      loadTranscript = choice;
+    }
+    onEdit?.call(app, loadTranscript: loadTranscript);
+  }
+
   Future<void> _confirmDelete(BuildContext context, InstalledApp app) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('Delete ${app.manifest.name}?'),
-        content: const Text('This will remove the app from your folder. '
-            'This cannot be undone.'),
+        content: const Text(
+          'This will remove the app from your folder. '
+          'This cannot be undone.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -68,6 +135,11 @@ class StoreScreen extends StatelessWidget {
         title: const Text('Good Vibes'),
         actions: [
           IconButton(
+            tooltip: 'New app',
+            icon: const Icon(Icons.add_circle_outline),
+            onPressed: onNewApp,
+          ),
+          IconButton(
             tooltip: 'Open apps folder',
             icon: const Icon(Icons.folder_open),
             onPressed: () async {
@@ -91,8 +163,11 @@ class StoreScreen extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.widgets_outlined,
-                      size: 64, color: Theme.of(context).colorScheme.outline),
+                  Icon(
+                    Icons.widgets_outlined,
+                    size: 64,
+                    color: Theme.of(context).colorScheme.outline,
+                  ),
                   const SizedBox(height: 12),
                   Text(
                     'No apps yet',
@@ -122,7 +197,9 @@ class StoreScreen extends StatelessWidget {
                 app: app,
                 server: server,
                 onOpen: () => _open(context, app),
-                onEdit: () => onEdit?.call(app),
+                onOpenInBrowser: () => _openInSystemBrowser(context, app),
+                onEdit: () => _edit(context, app),
+                onDebug: () => _debug(context, app),
                 onDelete: () => _confirmDelete(context, app),
               );
             },
@@ -137,14 +214,18 @@ class _AppCard extends StatelessWidget {
   final InstalledApp app;
   final LocalServer server;
   final VoidCallback onOpen;
+  final VoidCallback onOpenInBrowser;
   final VoidCallback onEdit;
+  final VoidCallback onDebug;
   final VoidCallback onDelete;
 
   const _AppCard({
     required this.app,
     required this.server,
     required this.onOpen,
+    required this.onOpenInBrowser,
     required this.onEdit,
+    required this.onDebug,
     required this.onDelete,
   });
 
@@ -152,8 +233,7 @@ class _AppCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final m = app.manifest;
-    final iconUrl =
-        m.icon == null ? null : server.urlForAsset(m.id, m.icon!);
+    final iconUrl = m.icon == null ? null : server.urlForAsset(m.id, m.icon!);
 
     return Card(
       clipBehavior: Clip.antiAlias,
@@ -179,6 +259,8 @@ class _AppCard extends StatelessWidget {
                   PopupMenuButton<String>(
                     onSelected: (value) {
                       if (value == 'edit') onEdit();
+                      if (value == 'browser') onOpenInBrowser();
+                      if (value == 'debug') onDebug();
                       if (value == 'delete') onDelete();
                     },
                     itemBuilder: (ctx) => const [
@@ -188,6 +270,22 @@ class _AppCard extends StatelessWidget {
                           contentPadding: EdgeInsets.zero,
                           leading: Icon(Icons.edit_outlined),
                           title: Text('Edit'),
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'browser',
+                        child: ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.open_in_browser_outlined),
+                          title: Text('Open in browser'),
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'debug',
+                        child: ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.bug_report_outlined),
+                          title: Text('Debug'),
                         ),
                       ),
                       PopupMenuItem(
@@ -270,7 +368,8 @@ class AppIcon extends StatelessWidget {
         width: size,
         height: size,
         fit: BoxFit.cover,
-        errorBuilder: (_, _, _) => fallback,      ),
+        errorBuilder: (_, _, _) => fallback,
+      ),
     );
   }
 }

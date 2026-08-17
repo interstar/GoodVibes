@@ -15,7 +15,7 @@ Good Vibes has three main areas:
 - **Store**: shows installed local tools in a grid.
 - **Vibe Studio**: a chat interface where the user describes a tool and an LLM
   generates it.
-- **Settings**: stores the Xybrid API key and the apps folder location.
+- **Settings**: stores AI profiles, secure API-key references, and the apps folder location.
 
 Opening a tool launches it in a separate native webview window. On Linux this
 uses WebKitGTK, on Windows WebView2, and on macOS WKWebView through
@@ -125,7 +125,8 @@ sudo apt install -y \
   build-essential g++ g++-14 libstdc++-14-dev \
   clang cmake ninja-build pkg-config \
   libgtk-3-dev \
-  libwebkit2gtk-4.1-dev libsoup-3.0-dev
+  libwebkit2gtk-4.1-dev libsoup-3.0-dev \
+  libsecret-1-0 libsecret-1-dev
 ```
 
 Flutter:
@@ -181,7 +182,10 @@ Without an API key, Xybrid can use an on-device model. The first run may downloa
 large model files, usually hundreds of megabytes to a few gigabytes.
 
 With a Xybrid API key, the app can use cloud fallback for better code generation
-quality. Enter the key in the Settings tab.
+quality. The Settings tab also supports OpenAI-compatible cloud profiles such as
+Together AI, DeepSeek, OpenAI, or a custom endpoint. API keys are stored with the
+platform secure store (libsecret on Linux, Keychain on macOS, Credential Manager
+on Windows).
 
 ## Project Layout
 

@@ -3,9 +3,8 @@ import 'dart:io';
 import 'package:flutter/material.dart' show debugPrint;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
-import 'package:xybrid_flutter/xybrid_flutter.dart';
-
 import 'package:good_vibes/models/app_manifest.dart';
+import 'package:good_vibes/services/ai_profile.dart';
 import 'package:good_vibes/services/app_catalog.dart';
 import 'package:good_vibes/services/app_generator.dart';
 import 'package:good_vibes/services/llm_service.dart';
@@ -52,21 +51,24 @@ void main() {
 
     final llm = LlmService(modelId: 'llama-3.2-1b');
     await llm.init();
-    await llm.ensureModel();
+    await llm.ensureReady();
 
-    final context = ConversationContext();
+    final context = AiConversation();
     final system = await AppGenerator.buildSystemPrompt(editApp: app);
     context.setSystem(system);
     const userText = 'Add a reset button that sets the count back to 0.';
 
     final buffer = StringBuffer();
-    final cancel = CancellationToken();
-    await for (final token in llm.streamChat(context, userText,
-        cancellationToken: cancel)) {
+    final cancel = AiCancellationToken();
+    await for (final token in llm.streamChat(
+      context,
+      userText,
+      cancellationToken: cancel,
+    )) {
       if (token.isError) {
         fail('Stream error: ${token.errorMessage}');
       }
-      buffer.write(token.token);
+      buffer.write(token.text);
     }
 
     final fullText = buffer.toString().trim();
@@ -89,8 +91,7 @@ void main() {
     expect(installed.dir, appDir.path);
 
     // New functionality landed in index.html.
-    final newHtml =
-        File('${appDir.path}/index.html').readAsStringSync();
+    final newHtml = File('${appDir.path}/index.html').readAsStringSync();
     expect(newHtml.toLowerCase(), contains('reset'));
 
     // Untouched files survived.

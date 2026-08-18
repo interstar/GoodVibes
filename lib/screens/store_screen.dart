@@ -15,7 +15,12 @@ class StoreScreen extends StatelessWidget {
 
   /// Called when the user picks "Edit" on an app; the shell switches to the
   /// Studio with that app as the edit target.
-  final void Function(InstalledApp app, {required bool loadTranscript})? onEdit;
+  final void Function(
+    InstalledApp app, {
+    required bool loadTranscript,
+    String? initialDraft,
+  })?
+  onEdit;
   final VoidCallback? onNewApp;
 
   const StoreScreen({
@@ -30,44 +35,16 @@ class StoreScreen extends StatelessWidget {
   Future<void> _open(BuildContext context, InstalledApp app) async {
     final url = server.urlForApp(app.manifest.id);
     try {
-      await openAppInBrowser(url: url, title: app.manifest.name);
+      await openAppInBrowser(
+        url: url,
+        title: app.manifest.name,
+        onEdit: (consoleText) =>
+            _editFromAppWindow(app, consoleText: consoleText),
+      );
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Could not open "${app.manifest.name}": $e')),
-        );
-      }
-    }
-  }
-
-  Future<void> _debug(BuildContext context, InstalledApp app) async {
-    final url = server.urlForApp(app.manifest.id);
-    try {
-      await openAppInDebugBrowser(url: url, title: app.manifest.name);
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not debug "${app.manifest.name}": $e')),
-        );
-      }
-    }
-  }
-
-  Future<void> _openInSystemBrowser(
-    BuildContext context,
-    InstalledApp app,
-  ) async {
-    final url = server.urlForApp(app.manifest.id);
-    try {
-      await openAppInSystemBrowser(url: url);
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Could not open "${app.manifest.name}" in browser: $e',
-            ),
-          ),
         );
       }
     }
@@ -100,6 +77,20 @@ class StoreScreen extends StatelessWidget {
       loadTranscript = choice;
     }
     onEdit?.call(app, loadTranscript: loadTranscript);
+  }
+
+  void _editFromAppWindow(InstalledApp app, {required String? consoleText}) {
+    onEdit?.call(
+      app,
+      loadTranscript: true,
+      initialDraft: _consoleDraft(consoleText),
+    );
+  }
+
+  static String? _consoleDraft(String? consoleText) {
+    final trimmed = consoleText?.trim();
+    if (trimmed == null || trimmed.isEmpty) return null;
+    return 'Please help me debug this app. The app console currently says:\n\n$trimmed';
   }
 
   Future<void> _confirmDelete(BuildContext context, InstalledApp app) async {
@@ -197,9 +188,7 @@ class StoreScreen extends StatelessWidget {
                 app: app,
                 server: server,
                 onOpen: () => _open(context, app),
-                onOpenInBrowser: () => _openInSystemBrowser(context, app),
                 onEdit: () => _edit(context, app),
-                onDebug: () => _debug(context, app),
                 onDelete: () => _confirmDelete(context, app),
               );
             },
@@ -214,18 +203,14 @@ class _AppCard extends StatelessWidget {
   final InstalledApp app;
   final LocalServer server;
   final VoidCallback onOpen;
-  final VoidCallback onOpenInBrowser;
   final VoidCallback onEdit;
-  final VoidCallback onDebug;
   final VoidCallback onDelete;
 
   const _AppCard({
     required this.app,
     required this.server,
     required this.onOpen,
-    required this.onOpenInBrowser,
     required this.onEdit,
-    required this.onDebug,
     required this.onDelete,
   });
 
@@ -259,8 +244,6 @@ class _AppCard extends StatelessWidget {
                   PopupMenuButton<String>(
                     onSelected: (value) {
                       if (value == 'edit') onEdit();
-                      if (value == 'browser') onOpenInBrowser();
-                      if (value == 'debug') onDebug();
                       if (value == 'delete') onDelete();
                     },
                     itemBuilder: (ctx) => const [
@@ -270,22 +253,6 @@ class _AppCard extends StatelessWidget {
                           contentPadding: EdgeInsets.zero,
                           leading: Icon(Icons.edit_outlined),
                           title: Text('Edit'),
-                        ),
-                      ),
-                      PopupMenuItem(
-                        value: 'browser',
-                        child: ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: Icon(Icons.open_in_browser_outlined),
-                          title: Text('Open in browser'),
-                        ),
-                      ),
-                      PopupMenuItem(
-                        value: 'debug',
-                        child: ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: Icon(Icons.bug_report_outlined),
-                          title: Text('Debug'),
                         ),
                       ),
                       PopupMenuItem(

@@ -285,7 +285,9 @@ class _AiProfileEditorDialogState extends State<AiProfileEditorDialog> {
   late TextEditingController _modelController;
   late TextEditingController _keyController;
   late TextEditingController _temperatureController;
-  late TextEditingController _maxTokensController;
+  static const List<int> _maxTokenOptions = [4096, 8192, 16384, 32768];
+
+  late int _maxTokens;
   bool _obscure = true;
 
   @override
@@ -306,9 +308,10 @@ class _AiProfileEditorDialogState extends State<AiProfileEditorDialog> {
     _temperatureController = TextEditingController(
       text: (existing?.temperature ?? 0.4).toString(),
     );
-    _maxTokensController = TextEditingController(
-      text: (existing?.maxTokens ?? 4096).toString(),
-    );
+    final maxTokens = existing?.maxTokens ?? AiProfile.defaultMaxTokens;
+    _maxTokens = _maxTokenOptions.contains(maxTokens)
+        ? maxTokens
+        : AiProfile.defaultMaxTokens;
   }
 
   @override
@@ -318,7 +321,6 @@ class _AiProfileEditorDialogState extends State<AiProfileEditorDialog> {
     _modelController.dispose();
     _keyController.dispose();
     _temperatureController.dispose();
-    _maxTokensController.dispose();
     super.dispose();
   }
 
@@ -429,30 +431,28 @@ class _AiProfileEditorDialogState extends State<AiProfileEditorDialog> {
                 ),
               ),
               const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _temperatureController,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      decoration: const InputDecoration(
-                        labelText: 'Temperature',
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextField(
-                      controller: _maxTokensController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'Max tokens',
-                      ),
-                    ),
-                  ),
+              TextField(
+                controller: _temperatureController,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: const InputDecoration(labelText: 'Temperature'),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<int>(
+                initialValue: _maxTokens,
+                decoration: const InputDecoration(
+                  labelText: 'Output token limit',
+                  helperText:
+                      'Use 32768 unless this provider fails on large responses.',
+                ),
+                items: [
+                  for (final value in _maxTokenOptions)
+                    DropdownMenuItem(value: value, child: Text('$value')),
                 ],
+                onChanged: (value) {
+                  if (value != null) setState(() => _maxTokens = value);
+                },
               ),
             ],
           ),
@@ -477,7 +477,6 @@ class _AiProfileEditorDialogState extends State<AiProfileEditorDialog> {
     }
     final temperature =
         double.tryParse(_temperatureController.text.trim()) ?? 0.4;
-    final maxTokens = int.tryParse(_maxTokensController.text.trim()) ?? 4096;
     final id = widget.existing?.id ?? _newProfileId(name);
     Navigator.pop(
       context,
@@ -489,7 +488,7 @@ class _AiProfileEditorDialogState extends State<AiProfileEditorDialog> {
         baseUrl: _needsEndpoint ? endpoint : null,
         apiKey: _keyController.text.trim(),
         temperature: temperature,
-        maxTokens: maxTokens,
+        maxTokens: _maxTokens,
       ),
     );
   }
@@ -547,10 +546,10 @@ class _AiProfileCard extends StatelessWidget {
                 ],
               ),
             ),
-            IconButton(
-              tooltip: 'Edit profile',
+            TextButton.icon(
               onPressed: onEdit,
-              icon: const Icon(Icons.edit_outlined),
+              icon: const Icon(Icons.edit_outlined, size: 18),
+              label: const Text('Edit'),
             ),
             if (onDelete != null)
               IconButton(

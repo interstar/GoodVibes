@@ -9,7 +9,8 @@ import 'package:good_vibes/services/app_generator.dart';
 void main() {
   group('AppGenerator.parse', () {
     test('parses the fenced-file app block format', () {
-      final text = 'Sure! Here it is:\n\n'
+      final text =
+          'Sure! Here it is:\n\n'
           '<app>\n'
           'id: pomodoro-timer\n'
           'name: Pomodoro Timer\n'
@@ -31,7 +32,8 @@ void main() {
     });
 
     test('keeps multi-line file contents intact', () {
-      final text = '<app>\n'
+      final text =
+          '<app>\n'
           'id: notes\n'
           'name: Notes\n'
           'description: a\n'
@@ -47,7 +49,8 @@ void main() {
     });
 
     test('extracts the json code block from a chatty reply', () {
-      final text = 'Sure! Here is your app:\n\n'
+      final text =
+          'Sure! Here is your app:\n\n'
           '```json\n'
           '{\n'
           '  "id": "pomodoro-timer",\n'
@@ -69,7 +72,8 @@ void main() {
     });
 
     test('parses a bare json block with no fences', () {
-      final text = '{"id":"notes","name":"Notes","description":"","files":'
+      final text =
+          '{"id":"notes","name":"Notes","description":"","files":'
           '{"index.html":"<html></html>"}}';
 
       final app = AppGenerator.parse(text);
@@ -78,41 +82,51 @@ void main() {
     });
 
     test('rescues a bare html reply into an index.html app', () {
-      final app = AppGenerator.parse('<!DOCTYPE html><html><body>hi</body></html>');
+      final app = AppGenerator.parse(
+        '<!DOCTYPE html><html><body>hi</body></html>',
+      );
       expect(app.id, 'my-app');
       expect(app.files['index.html'], contains('<body>'));
     });
 
-    test('rescues a truncated <app> block with no closing tag', () {
-      final text = '<app>\n'
+    test('rejects a truncated <app> block with no closing tag', () {
+      final text =
+          '<app>\n'
           'id: timer\n'
           'name: Timer\n'
           'description: a\n'
           '=== FILE: index.html ===\n'
           '<!DOCTYPE html>\n'
           '<html><body>hi</body></html>';
-      final app = AppGenerator.parse(text);
-      expect(app.id, 'timer');
-      expect(app.files['index.html'], contains('</body></html>'));
+      expect(
+        () => AppGenerator.parse(text),
+        throwsA(isA<GenerateParseException>()),
+      );
     });
 
     test('rejects an invalid id', () {
       expect(
-        () => AppGenerator.parse('{"id":"Bad ID","name":"x","files":'
-            '{"index.html":""}}'),
+        () => AppGenerator.parse(
+          '{"id":"Bad ID","name":"x","files":'
+          '{"index.html":""}}',
+        ),
         throwsA(isA<GenerateParseException>()),
       );
       expect(
-        () => AppGenerator.parse('<app>\nid: Bad ID\nname: x\n'
-            '=== FILE: index.html ===\nhi\n</app>'),
+        () => AppGenerator.parse(
+          '<app>\nid: Bad ID\nname: x\n'
+          '=== FILE: index.html ===\nhi\n</app>',
+        ),
         throwsA(isA<GenerateParseException>()),
       );
     });
 
     test('rejects output without index.html', () {
       expect(
-        () => AppGenerator.parse('{"id":"ok","name":"x","files":'
-            '{"style.css":""}}'),
+        () => AppGenerator.parse(
+          '{"id":"ok","name":"x","files":'
+          '{"style.css":""}}',
+        ),
         throwsA(isA<GenerateParseException>()),
       );
     });
@@ -137,18 +151,23 @@ void main() {
     });
 
     GeneratedApp generated(String id) => GeneratedApp(
-          id: id,
-          name: 'Test App',
-          description: 'desc',
-          files: {'index.html': '<html>new</html>'},
-        );
+      id: id,
+      name: 'Test App',
+      description: 'desc',
+      files: {'index.html': '<html>new</html>'},
+    );
 
     test('writes into the generated id by default', () async {
-      final app = await AppGenerator.write(appsDir: temp, app: generated('alpha'));
+      final app = await AppGenerator.write(
+        appsDir: temp,
+        app: generated('alpha'),
+      );
       expect(app.manifest.id, 'alpha');
       expect(app.dir, endsWith('/alpha'));
-      expect(File('${app.dir}/index.html').readAsStringSync(),
-          '<html>new</html>');
+      expect(
+        File('${app.dir}/index.html').readAsStringSync(),
+        '<html>new</html>',
+      );
     });
 
     test('overrideId forces the target folder and manifest id', () async {
@@ -158,8 +177,10 @@ void main() {
         overrideId: 'existing-app',
       );
       expect(app.manifest.id, 'existing-app');
-      expect(File('${app.dir}/manifest.json').readAsStringSync(),
-          contains('"id": "existing-app"'));
+      expect(
+        File('${app.dir}/manifest.json').readAsStringSync(),
+        contains('"id": "existing-app"'),
+      );
     });
 
     test('keepUnmentionedFiles preserves untouched files', () async {
@@ -174,8 +195,10 @@ void main() {
         keepUnmentionedFiles: true,
       );
       expect(File('${app.dir}/icon.svg').existsSync(), isTrue);
-      expect(File('${app.dir}/index.html').readAsStringSync(),
-          '<html>new</html>');
+      expect(
+        File('${app.dir}/index.html').readAsStringSync(),
+        '<html>new</html>',
+      );
     });
 
     test('without keepUnmentionedFiles a stale folder is wiped', () async {
@@ -183,7 +206,10 @@ void main() {
       await existing.create(recursive: true);
       File('${existing.path}/old.js').writeAsStringSync('leftover');
 
-      final app = await AppGenerator.write(appsDir: temp, app: generated('gamma'));
+      final app = await AppGenerator.write(
+        appsDir: temp,
+        app: generated('gamma'),
+      );
       expect(File('${app.dir}/old.js').existsSync(), isFalse);
       expect(File('${app.dir}/index.html').existsSync(), isTrue);
     });
@@ -200,13 +226,15 @@ void main() {
       dir: '/nope/hello-world',
     );
 
-    test('edit mode instructs the model to keep the id and include source',
-        () async {
-      final prompt = await AppGenerator.buildSystemPrompt(editApp: installed);
-      expect(prompt, contains('Task: edit the existing app'));
-      expect(prompt, contains('The id MUST stay "hello-world"'));
-      expect(prompt, contains('Output the COMPLETE updated files'));
-    });
+    test(
+      'edit mode instructs the model to keep the id and include source',
+      () async {
+        final prompt = await AppGenerator.buildSystemPrompt(editApp: installed);
+        expect(prompt, contains('Task: edit the existing app'));
+        expect(prompt, contains('The id MUST stay "hello-world"'));
+        expect(prompt, contains('Output the COMPLETE updated files'));
+      },
+    );
 
     test('edit mode ignores the reference app', () async {
       final prompt = await AppGenerator.buildSystemPrompt(
@@ -258,8 +286,10 @@ void main() {
   group('AppGenerator default helpers', () {
     test('spec embeds the default template', () {
       expect(AppGenerator.appStructureSpec, contains('### Default template'));
-      expect(AppGenerator.appStructureSpec,
-          contains(AppGenerator.defaultTemplate));
+      expect(
+        AppGenerator.appStructureSpec,
+        contains(AppGenerator.defaultTemplate),
+      );
     });
 
     test('default template wires up Tailwind, Inter and the store helper', () {

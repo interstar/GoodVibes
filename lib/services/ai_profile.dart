@@ -19,6 +19,7 @@ AiProviderType _providerFromJson(Object? value) {
 /// of this profile, not provider-specific SDK classes.
 class AiProfile {
   static const Object _unset = Object();
+  static const int defaultMaxTokens = 32768;
   final String id;
   final String name;
   final AiProviderType provider;
@@ -36,7 +37,7 @@ class AiProfile {
     this.apiKey,
     this.baseUrl,
     this.temperature = 0.4,
-    this.maxTokens = 4096,
+    this.maxTokens = defaultMaxTokens,
   });
 
   factory AiProfile.xybrid({required String model, String? apiKey}) {
@@ -56,7 +57,7 @@ class AiProfile {
     required String model,
     String? apiKey,
     double temperature = 0.4,
-    int maxTokens = 4096,
+    int maxTokens = defaultMaxTokens,
   }) {
     return AiProfile(
       id: id,
@@ -114,7 +115,7 @@ class AiProfile {
       baseUrl: json['baseUrl'] as String?,
       apiKey: apiKey,
       temperature: (json['temperature'] as num?)?.toDouble() ?? 0.4,
-      maxTokens: (json['maxTokens'] as num?)?.toInt() ?? 4096,
+      maxTokens: (json['maxTokens'] as num?)?.toInt() ?? defaultMaxTokens,
     );
   }
 }

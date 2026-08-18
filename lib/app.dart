@@ -80,6 +80,8 @@ class _HomeShellState extends State<_HomeShell> {
   int _index = 0;
   String? _editTargetId;
   bool _loadEditTranscript = true;
+  String? _editDraft;
+  int _editRequestSerial = 0;
 
   @override
   Widget build(BuildContext context) {
@@ -94,14 +96,19 @@ class _HomeShellState extends State<_HomeShell> {
             catalog: widget.catalog,
             server: widget.server,
             settings: widget.settings,
-            onEdit: (app, {required loadTranscript}) => setState(() {
-              _editTargetId = app.manifest.id;
-              _loadEditTranscript = loadTranscript;
-              _index = 1;
-            }),
+            onEdit: (app, {required loadTranscript, String? initialDraft}) =>
+                setState(() {
+                  _editTargetId = app.manifest.id;
+                  _loadEditTranscript = loadTranscript;
+                  _editDraft = initialDraft;
+                  _editRequestSerial += 1;
+                  _index = 1;
+                }),
             onNewApp: () => setState(() {
               _editTargetId = null;
               _loadEditTranscript = true;
+              _editDraft = null;
+              _editRequestSerial += 1;
               _index = 1;
             }),
           ),
@@ -112,6 +119,9 @@ class _HomeShellState extends State<_HomeShell> {
             server: widget.server,
             editTarget: editTarget,
             loadTranscript: _loadEditTranscript,
+            initialDraft: _editDraft,
+            editRequestSerial: _editRequestSerial,
+            onInitialDraftConsumed: () => setState(() => _editDraft = null),
             onEditTargetChanged: (app) => setState(() {
               _editTargetId = app?.manifest.id;
               _loadEditTranscript = true;

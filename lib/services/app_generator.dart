@@ -73,7 +73,8 @@ const store = {
 
   /// The contract that tells the LLM what a Good Vibes app is. Also shown in
   /// the Vibe Studio UI so users understand what will be built.
-  static const String appStructureSpec = '''
+  static const String appStructureSpec =
+      '''
 ## What a Good Vibes app is
 
 A Good Vibes app is a small, self-contained HTML app stored in its own folder. 
@@ -160,15 +161,19 @@ $defaultTemplate
     InstalledApp? editApp,
   }) async {
     final buffer = StringBuffer()
-      ..writeln('You are the Good Vibes app builder. You turn a user\'s casual '
-          'request into a working HTML app that gets installed into their local '
-          'app store.')
+      ..writeln(
+        'You are the Good Vibes app builder. You turn a user\'s casual '
+        'request into a working HTML app that gets installed into their local '
+        'app store.',
+      )
       ..writeln()
       ..writeln(appStructureSpec)
       ..writeln('## Installed apps')
-      ..writeln('Here is the current app store so you know what already exists '
-          'and can match the vibe of a request like "make me one like the '
-          'calculator".')
+      ..writeln(
+        'Here is the current app store so you know what already exists '
+        'and can match the vibe of a request like "make me one like the '
+        'calculator".',
+      )
       ..writeln();
 
     final apps = installedApps;
@@ -176,9 +181,10 @@ $defaultTemplate
       buffer.writeln('- (no apps installed yet)');
     } else {
       for (final app in apps) {
-        buffer
-            .writeln('- ${app.manifest.name} (id: ${app.manifest.id}): '
-                '${app.manifest.description}');
+        buffer.writeln(
+          '- ${app.manifest.name} (id: ${app.manifest.id}): '
+          '${app.manifest.description}',
+        );
       }
     }
 
@@ -186,34 +192,48 @@ $defaultTemplate
       buffer
         ..writeln()
         ..writeln('## Task: edit the existing app "${editApp.manifest.name}"')
-        ..writeln('The user wants you to MODIFY this app in place. Here are '
-            'its current files:')
+        ..writeln(
+          'The user wants you to MODIFY this app in place. Here are '
+          'its current files:',
+        )
         ..writeln()
         ..writeln('<app-source>')
         ..writeln(await _readAppFiles(editApp))
         ..writeln('</app-source>')
         ..writeln()
-        ..writeln('Apply the user\'s requested changes: add the requested '
-            'functionality while keeping everything else working.')
+        ..writeln(
+          'Apply the user\'s requested changes: add the requested '
+          'functionality while keeping everything else working.',
+        )
         ..writeln('Rules:')
         ..writeln('- The id MUST stay "${editApp.manifest.id}".')
-        ..writeln('- Output the COMPLETE updated files in the <app> block - '
-            'not diffs, not fragments.')
-        ..writeln('- If the user added functionality, make sure it is fully '
-            'wired up (buttons, handlers, etc.).')
-        ..writeln('- If your code references another file (e.g. script.js, '
-            'styles.css) via src/href, you MUST also output it as its own '
-            '=== FILE: ... === block. Otherwise inline the code directly.')
-        ..writeln('- You may add new files, but keep every existing file\'s '
-            'purpose intact.');
+        ..writeln(
+          '- Output the COMPLETE updated files in the <app> block - '
+          'not diffs, not fragments.',
+        )
+        ..writeln(
+          '- If the user added functionality, make sure it is fully '
+          'wired up (buttons, handlers, etc.).',
+        )
+        ..writeln(
+          '- If your code references another file (e.g. script.js, '
+          'styles.css) via src/href, you MUST also output it as its own '
+          '=== FILE: ... === block. Otherwise inline the code directly.',
+        )
+        ..writeln(
+          '- You may add new files, but keep every existing file\'s '
+          'purpose intact.',
+        );
     } else if (referenceApp != null) {
       buffer
         ..writeln()
         ..writeln('## Reference app: ${referenceApp.manifest.name}')
-        ..writeln('The user chose this app as the style and structure to '
-            'emulate. Here is its source - study the look, layout, and '
-            'implementation so your new app feels like part of the same '
-            'family, but build something new.')
+        ..writeln(
+          'The user chose this app as the style and structure to '
+          'emulate. Here is its source - study the look, layout, and '
+          'implementation so your new app feels like part of the same '
+          'family, but build something new.',
+        )
         ..writeln()
         ..writeln('<reference-app-source>')
         ..writeln(await _readReferenceSource(referenceApp))
@@ -222,8 +242,10 @@ $defaultTemplate
 
     buffer
       ..writeln()
-      ..writeln('Remember: reply with only the <app>...</app> block described '
-          'above. Do not add commentary inside the block.');
+      ..writeln(
+        'Remember: reply with only the <app>...</app> block described '
+        'above. Do not add commentary inside the block.',
+      );
 
     return buffer.toString();
   }
@@ -331,26 +353,26 @@ $defaultTemplate
 
   /// Parse the `<app>...</app>` fenced-file format.
   ///
-  /// Tolerates a truncated reply where the model starts an `<app>` block but
-  /// stops before writing the closing `</app>` (common with small models) - in
-  /// that case everything from `<app>` to the end of the text is used.
+  /// Parse only complete `<app>...</app>` blocks. An unclosed block usually
+  /// means the provider stopped mid-file, so accepting it would install a
+  /// broken partial app.
   static GeneratedApp? _tryAppBlock(String text) {
-    final closed =
-        RegExp(r'<app>([\s\S]*?)</app>', caseSensitive: false).firstMatch(text);
-    String body;
-    if (closed != null) {
-      body = closed.group(1)!;
-    } else {
-      final open =
-          RegExp(r'<app>([\s\S]*)', caseSensitive: false).firstMatch(text);
+    final closed = RegExp(
+      r'<app>([\s\S]*?)</app>',
+      caseSensitive: false,
+    ).firstMatch(text);
+    if (closed == null) {
+      final open = RegExp(r'<app>', caseSensitive: false).firstMatch(text);
       if (open == null) return null;
-      body = open.group(1)!;
+      throw GenerateParseException(
+        'The model response stopped before the closing </app> marker. '
+        'The app was not installed because the generated code is incomplete.',
+        text,
+      );
     }
+    final body = closed.group(1)!;
 
-    final fileMarker = RegExp(
-      r'^=== FILE:\s*(.+?)\s*===\s*$',
-      multiLine: true,
-    );
+    final fileMarker = RegExp(r'^=== FILE:\s*(.+?)\s*===\s*$', multiLine: true);
 
     final starts = <int>[];
     final markerEnds = <int>[];
@@ -366,8 +388,9 @@ $defaultTemplate
     final header = body.substring(0, starts.first);
     String? id, name, description;
     for (final line in header.split('\n')) {
-      final m = RegExp(r'^\s*(id|name|description)\s*:\s*(.*)$')
-          .firstMatch(line);
+      final m = RegExp(
+        r'^\s*(id|name|description)\s*:\s*(.*)$',
+      ).firstMatch(line);
       if (m == null) continue;
       final key = m.group(1)!;
       final value = m.group(2)!.trim();
@@ -391,8 +414,10 @@ $defaultTemplate
 
   /// Parse the legacy ```json code block format.
   static GeneratedApp? _tryJsonBlock(String text) {
-    final match = RegExp(r'```json\s*([\s\S]*?)```', caseSensitive: false)
-        .firstMatch(text);
+    final match = RegExp(
+      r'```json\s*([\s\S]*?)```',
+      caseSensitive: false,
+    ).firstMatch(text);
     final raw = match?.group(1)?.trim() ?? text.trim();
     if (raw.isEmpty || !raw.startsWith('{')) return null;
 
@@ -471,7 +496,9 @@ $defaultTemplate
       version: '1.0.0',
       icon: app.files.containsKey('icon.svg') ? 'icon.svg' : null,
     );
-    await File(p.join(dir.path, 'manifest.json')).writeAsString(manifest.encode());
+    await File(
+      p.join(dir.path, 'manifest.json'),
+    ).writeAsString(manifest.encode());
     return InstalledApp(manifest: manifest, dir: dir.path);
   }
 

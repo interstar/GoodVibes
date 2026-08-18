@@ -277,7 +277,20 @@ class LlmService {
           final data = line.substring(5).trim();
           if (data.isEmpty) continue;
           if (data == '[DONE]') return;
-          final text = _contentFromOpenAiChunk(data);
+          final parsed = _parseOpenAiChunk(data);
+          if (parsed.finishReason == 'length') {
+            yield AiStreamChunk.error(
+              'The AI stopped because it hit the output token limit. Good Vibes needs the complete app source on every turn, so choose a model or provider with a larger output limit, then try again.',
+            );
+            return;
+          }
+          if (parsed.finishReason == 'content_filter') {
+            yield AiStreamChunk.error(
+              'The AI provider stopped the response with finish_reason=content_filter.',
+            );
+            return;
+          }
+          final text = parsed.content;
           if (text == null || text.isEmpty) continue;
           if (!gotFirst) {
             gotFirst = true;
@@ -303,23 +316,35 @@ class LlmService {
     return Uri.parse('$trimmed/chat/completions');
   }
 
-  static String? _contentFromOpenAiChunk(String data) {
+  static _OpenAiChunk _parseOpenAiChunk(String data) {
     final decoded = jsonDecode(data);
-    if (decoded is! Map) return null;
+    if (decoded is! Map) return const _OpenAiChunk();
     final choices = decoded['choices'];
-    if (choices is! List || choices.isEmpty) return null;
+    if (choices is! List || choices.isEmpty) return const _OpenAiChunk();
     final first = choices.first;
-    if (first is! Map) return null;
+    if (first is! Map) return const _OpenAiChunk();
+    final finishReason = first['finish_reason']?.toString();
     final delta = first['delta'];
     if (delta is Map && delta['content'] != null) {
-      return delta['content'].toString();
+      return _OpenAiChunk(
+        content: delta['content'].toString(),
+        finishReason: finishReason,
+      );
     }
     final message = first['message'];
     if (message is Map && message['content'] != null) {
-      return message['content'].toString();
+      return _OpenAiChunk(
+        content: message['content'].toString(),
+        finishReason: finishReason,
+      );
     }
-    if (first['text'] != null) return first['text'].toString();
-    return null;
+    if (first['text'] != null) {
+      return _OpenAiChunk(
+        content: first['text'].toString(),
+        finishReason: finishReason,
+      );
+    }
+    return _OpenAiChunk(finishReason: finishReason);
   }
 
   Stream<AiStreamChunk> _streamXybridChat(
@@ -395,4 +420,11 @@ class LlmService {
     }
     return context;
   }
+}
+
+class _OpenAiChunk {
+  final String? content;
+  final String? finishReason;
+
+  const _OpenAiChunk({this.content, this.finishReason});
 }

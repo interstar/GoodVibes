@@ -41,6 +41,9 @@ class VibeScreen extends StatefulWidget {
   /// result replaces the app in place.
   final InstalledApp? editTarget;
   final bool loadTranscript;
+  final String? initialDraft;
+  final int editRequestSerial;
+  final VoidCallback? onInitialDraftConsumed;
   final ValueChanged<InstalledApp?>? onEditTargetChanged;
 
   const VibeScreen({
@@ -51,6 +54,9 @@ class VibeScreen extends StatefulWidget {
     required this.server,
     this.editTarget,
     this.loadTranscript = true,
+    this.initialDraft,
+    this.editRequestSerial = 0,
+    this.onInitialDraftConsumed,
     this.onEditTargetChanged,
   });
 
@@ -72,6 +78,7 @@ class _VibeScreenState extends State<VibeScreen> {
   String? _status;
   InstalledApp? _editTarget;
   String? _loadedTranscriptAppId;
+  int _handledEditRequestSerial = -1;
 
   @override
   void initState() {
@@ -80,6 +87,7 @@ class _VibeScreenState extends State<VibeScreen> {
     if (_editTarget != null) {
       _prepareEditSession(_editTarget!, loadTranscript: widget.loadTranscript);
     }
+    _consumeInitialDraftIfNeeded();
   }
 
   @override
@@ -99,14 +107,17 @@ class _VibeScreenState extends State<VibeScreen> {
           _streamingText = '';
           _status = null;
         });
-        return;
+      } else {
+        _referenceAppId = null;
+        setState(() => _editTarget = widget.editTarget);
+        _prepareEditSession(
+          widget.editTarget!,
+          loadTranscript: widget.loadTranscript,
+        );
       }
-      _referenceAppId = null;
-      setState(() => _editTarget = widget.editTarget);
-      _prepareEditSession(
-        widget.editTarget!,
-        loadTranscript: widget.loadTranscript,
-      );
+    }
+    if (oldWidget.editRequestSerial != widget.editRequestSerial) {
+      _consumeInitialDraftIfNeeded();
     }
   }
 
@@ -115,6 +126,51 @@ class _VibeScreenState extends State<VibeScreen> {
     _inputController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _consumeInitialDraftIfNeeded() {
+    if (_handledEditRequestSerial == widget.editRequestSerial) return;
+    _handledEditRequestSerial = widget.editRequestSerial;
+    final draft = widget.initialDraft?.trim();
+    if (draft == null || draft.isEmpty) return;
+    _inputController.text = draft;
+    _inputController.selection = TextSelection.collapsed(offset: draft.length);
+    final onConsumed = widget.onInitialDraftConsumed;
+    if (onConsumed != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) onConsumed();
+      });
+    }
+  }
+
+  void _editInstalledAppFromWindow(InstalledApp app, String? consoleText) {
+    widget.onEditTargetChanged?.call(app);
+    setState(() {
+      _editTarget = app;
+      _referenceAppId = null;
+      _inputController.text = _consoleDraft(consoleText) ?? '';
+      _inputController.selection = TextSelection.collapsed(
+        offset: _inputController.text.length,
+      );
+    });
+    _prepareEditSession(app, loadTranscript: true);
+  }
+
+  static String? _consoleDraft(String? consoleText) {
+    final trimmed = consoleText?.trim();
+    if (trimmed == null || trimmed.isEmpty) return null;
+    return 'Please help me debug this app. The app console currently says:\n\n$trimmed';
+  }
+
+  static String _friendlyGenerationError(Object error) {
+    final text = error.toString();
+    if (error is HttpException &&
+        text.contains('Connection closed while receiving data')) {
+      return 'The AI connection closed before Good Vibes received the complete app source. '
+          'This can happen when the selected provider or model cannot stream a response as large as the profile output token limit. '
+          'Try lowering that profile limit, or use a model/provider with a larger reliable output limit.';
+    }
+    return 'Generation failed: $error';
   }
 
   Future<void> _resetConversation() async {
@@ -136,6 +192,7 @@ class _VibeScreenState extends State<VibeScreen> {
       _loadedTranscriptAppId = null;
       _referenceAppId = null;
       _pendingUserMessage = null;
+      _inputController.clear();
       _messages.clear();
       _context = null;
       _streaming = false;
@@ -330,11 +387,11 @@ class _VibeScreenState extends State<VibeScreen> {
     } catch (e) {
       if (mounted) {
         setState(() {
+          final message = _friendlyGenerationError(e);
           _streaming = false;
-          _status = 'Generation failed: $e';
+          _status = message;
           _messages.add(
-            _ChatMessage(fromUser: false, text: '')
-              ..errorDetail = 'Generation failed: $e',
+            _ChatMessage(fromUser: false, text: '')..errorDetail = message,
           );
         });
       }
@@ -423,6 +480,7 @@ class _VibeScreenState extends State<VibeScreen> {
                             errorDetail: m.errorDetail,
                             installedApp: m.installedApp,
                             server: widget.server,
+                            onEditApp: _editInstalledAppFromWindow,
                             onRetry: m.errorDetail == null
                                 ? null
                                 : () => _send(retry: true),
@@ -657,6 +715,7 @@ class _AssistantBubble extends StatelessWidget {
   final String? errorDetail;
   final InstalledApp? installedApp;
   final LocalServer? server;
+  final void Function(InstalledApp app, String? consoleText)? onEditApp;
   final VoidCallback? onRetry;
   final bool streaming;
 
@@ -665,6 +724,7 @@ class _AssistantBubble extends StatelessWidget {
     this.errorDetail,
     this.installedApp,
     this.server,
+    this.onEditApp,
     this.onRetry,
     this.streaming = false,
   });
@@ -675,6 +735,7 @@ class _AssistantBubble extends StatelessWidget {
       await openAppInBrowser(
         url: server!.urlForApp(installedApp!.manifest.id),
         title: installedApp!.manifest.name,
+        onEdit: (consoleText) => onEditApp?.call(installedApp!, consoleText),
       );
     } catch (e) {
       if (context.mounted) {

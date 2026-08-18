@@ -1,11 +1,14 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:desktop_webview_window/desktop_webview_window.dart';
 
-/// Opens a web app in a browser-style native window (embedded WebView).
+/// Opens a web app in a browser-style native window (embedded WebView) with
+/// Good Vibes controls injected over the generated app.
 Future<void> openAppInBrowser({
   required String url,
   required String title,
+  void Function(String? consoleText)? onEdit,
 }) async {
   final available = await WebviewWindow.isWebviewAvailable();
   if (!available) {
@@ -13,6 +16,19 @@ Future<void> openAppInBrowser({
   }
 
   final webview = await _createWindow(title: title);
+  if (Platform.isLinux || Platform.isMacOS) {
+    webview.registerJavaScriptMessageHandler('goodVibes', (_, body) async {
+      final closeAfterAction = await _handleGoodVibesMessage(
+        url: url,
+        body: body,
+        onEdit: onEdit,
+      );
+      if (closeAfterAction) {
+        webview.close();
+      }
+    });
+  }
+  webview.addScriptToExecuteOnDocumentCreated(_appChromeScript);
   webview.launch(url);
 }
 
@@ -38,20 +54,27 @@ Future<void> openAppInSystemBrowser({required String url}) async {
   }
 }
 
-/// Opens a web app with an in-page Good Vibes console overlay. The overlay
-/// captures console writes, window errors, and unhandled promise rejections.
-Future<void> openAppInDebugBrowser({
+Future<bool> _handleGoodVibesMessage({
   required String url,
-  required String title,
+  required dynamic body,
+  required void Function(String? consoleText)? onEdit,
 }) async {
-  final available = await WebviewWindow.isWebviewAvailable();
-  if (!available) {
-    throw StateError('WebView is not available on this system.');
+  final Object? decoded;
+  try {
+    decoded = body is String ? jsonDecode(body) : body;
+  } catch (_) {
+    return false;
   }
-
-  final webview = await _createWindow(title: '$title - Debug');
-  webview.addScriptToExecuteOnDocumentCreated(_debugOverlayScript);
-  webview.launch(url);
+  if (decoded is! Map) return false;
+  final action = decoded['action'] as String?;
+  final consoleText = decoded['console'] as String?;
+  if (action == 'edit') {
+    onEdit?.call(consoleText);
+    return true;
+  } else if (action == 'browser') {
+    await openAppInSystemBrowser(url: url);
+  }
+  return false;
 }
 
 Future<Webview> _createWindow({required String title}) {
@@ -66,15 +89,15 @@ Future<Webview> _createWindow({required String title}) {
   );
 }
 
-const String _debugOverlayScript = r'''
+const String _appChromeScript = r'''
 (function () {
-  if (window.__goodVibesConsoleInstalled) return;
-  window.__goodVibesConsoleInstalled = true;
+  if (window.__goodVibesChromeInstalled) return;
+  window.__goodVibesChromeInstalled = true;
 
   const MAX_ROWS = 250;
   const entries = [];
-  let root;
-  let body;
+  let consoleRoot;
+  let consoleBody;
   let badge;
   let expanded = false;
   let errorCount = 0;
@@ -89,31 +112,76 @@ const String _debugOverlayScript = r'''
     }
   }
 
+  function exportLog() {
+    return entries.map((entry) => '[' + entry.time + '] ' + entry.level.toUpperCase() + ': ' + entry.text).join('\n');
+  }
+
+  function sendGoodVibes(action) {
+    const payload = JSON.stringify({ action: action, console: exportLog() });
+    try {
+      if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.goodVibes) {
+        window.webkit.messageHandlers.goodVibes.postMessage(payload);
+        return;
+      }
+    } catch (_) {}
+    append('warn', ['Good Vibes control bridge is not available in this window.']);
+  }
+
   function ensureUi() {
-    if (root || !document.documentElement) return;
+    if (consoleRoot || !document.documentElement) return;
     const host = document.body || document.documentElement;
 
     const style = document.createElement('style');
     style.textContent = `
+      #good-vibes-toolbar, #good-vibes-console {
+        box-sizing: border-box;
+        z-index: 2147483647;
+        font: 12px/1.35 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      #good-vibes-toolbar *, #good-vibes-console * { box-sizing: border-box; }
+      #good-vibes-toolbar {
+        position: fixed;
+        top: 14px;
+        right: 14px;
+        display: flex;
+        gap: 6px;
+        padding: 6px;
+        border-radius: 10px;
+        background: rgba(15, 23, 42, 0.88);
+        border: 1px solid rgba(148, 163, 184, 0.45);
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+        backdrop-filter: blur(10px);
+      }
+      #good-vibes-toolbar button, #good-vibes-console button {
+        all: unset;
+        cursor: pointer;
+        border-radius: 7px;
+        color: #f8fafc;
+        background: rgba(148, 163, 184, 0.16);
+      }
+      #good-vibes-toolbar button {
+        min-width: 34px;
+        height: 30px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 9px;
+        font-weight: 700;
+      }
+      #good-vibes-toolbar button:hover, #good-vibes-console .gvc-action:hover,
+      #good-vibes-console .gvc-title:hover { background: rgba(148, 163, 184, 0.28); }
       #good-vibes-console {
         position: fixed;
         right: 14px;
         bottom: 14px;
         width: min(560px, calc(100vw - 28px));
         max-height: min(360px, calc(100vh - 28px));
-        z-index: 2147483647;
-        font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         color: #f8fafc;
         background: rgba(15, 23, 42, 0.96);
         border: 1px solid rgba(148, 163, 184, 0.5);
         box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
         border-radius: 10px;
         overflow: hidden;
-      }
-      #good-vibes-console button {
-        all: unset;
-        cursor: pointer;
-        box-sizing: border-box;
       }
       #good-vibes-console .gvc-head {
         display: flex;
@@ -124,8 +192,9 @@ const String _debugOverlayScript = r'''
         border-bottom: 1px solid rgba(148, 163, 184, 0.25);
       }
       #good-vibes-console .gvc-title {
-        font-weight: 700;
         flex: 1;
+        padding: 4px 8px;
+        font-weight: 700;
       }
       #good-vibes-console .gvc-badge {
         min-width: 18px;
@@ -142,15 +211,14 @@ const String _debugOverlayScript = r'''
       #good-vibes-console.has-errors .gvc-badge { background: #dc2626; }
       #good-vibes-console .gvc-action {
         padding: 4px 8px;
-        border-radius: 6px;
         color: #cbd5e1;
       }
-      #good-vibes-console .gvc-action:hover { background: rgba(148, 163, 184, 0.18); }
       #good-vibes-console .gvc-body {
         display: none;
         max-height: 300px;
         overflow: auto;
         padding: 8px 0;
+        font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       }
       #good-vibes-console.expanded .gvc-body { display: block; }
       #good-vibes-console .gvc-row {
@@ -166,9 +234,21 @@ const String _debugOverlayScript = r'''
     `;
     host.appendChild(style);
 
-    root = document.createElement('section');
-    root.id = 'good-vibes-console';
-    root.innerHTML = `
+    const toolbar = document.createElement('nav');
+    toolbar.id = 'good-vibes-toolbar';
+    toolbar.innerHTML = `
+      <button type="button" class="gv-edit" title="Edit this app">Edit</button>
+      <button type="button" class="gv-browser" title="Open in system browser">Browser</button>
+      <button type="button" class="gv-console" title="Show console">Console</button>
+    `;
+    host.appendChild(toolbar);
+    toolbar.querySelector('.gv-edit').addEventListener('click', () => sendGoodVibes('edit'));
+    toolbar.querySelector('.gv-browser').addEventListener('click', () => sendGoodVibes('browser'));
+    toolbar.querySelector('.gv-console').addEventListener('click', toggle);
+
+    consoleRoot = document.createElement('section');
+    consoleRoot.id = 'good-vibes-console';
+    consoleRoot.innerHTML = `
       <div class="gvc-head">
         <button class="gvc-title" type="button">Good Vibes Console</button>
         <span class="gvc-badge">0</span>
@@ -177,18 +257,18 @@ const String _debugOverlayScript = r'''
       </div>
       <div class="gvc-body"></div>
     `;
-    host.appendChild(root);
-    body = root.querySelector('.gvc-body');
-    badge = root.querySelector('.gvc-badge');
-    root.querySelector('.gvc-title').addEventListener('click', toggle);
-    root.querySelector('.gvc-copy').addEventListener('click', copyLog);
-    root.querySelector('.gvc-clear').addEventListener('click', clearLog);
+    host.appendChild(consoleRoot);
+    consoleBody = consoleRoot.querySelector('.gvc-body');
+    badge = consoleRoot.querySelector('.gvc-badge');
+    consoleRoot.querySelector('.gvc-title').addEventListener('click', toggle);
+    consoleRoot.querySelector('.gvc-copy').addEventListener('click', copyLog);
+    consoleRoot.querySelector('.gvc-clear').addEventListener('click', clearLog);
     render();
   }
 
   function toggle() {
     expanded = !expanded;
-    root.classList.toggle('expanded', expanded);
+    consoleRoot.classList.toggle('expanded', expanded);
   }
 
   function append(level, args) {
@@ -203,16 +283,16 @@ const String _debugOverlayScript = r'''
   }
 
   function render() {
-    if (!root || !body) return;
-    root.classList.toggle('has-errors', errorCount > 0);
+    if (!consoleRoot || !consoleBody) return;
+    consoleRoot.classList.toggle('has-errors', errorCount > 0);
     badge.textContent = String(errorCount || entries.length);
-    body.replaceChildren(...entries.map((entry) => {
+    consoleBody.replaceChildren(...entries.map((entry) => {
       const row = document.createElement('div');
       row.className = 'gvc-row gvc-' + entry.level;
       row.textContent = '[' + entry.time + '] ' + entry.level.toUpperCase() + ': ' + entry.text;
       return row;
     }));
-    body.scrollTop = body.scrollHeight;
+    consoleBody.scrollTop = consoleBody.scrollHeight;
   }
 
   function clearLog() {
@@ -222,8 +302,7 @@ const String _debugOverlayScript = r'''
   }
 
   async function copyLog() {
-    const text = entries.map((entry) => '[' + entry.time + '] ' + entry.level.toUpperCase() + ': ' + entry.text).join('\n');
-    try { await navigator.clipboard.writeText(text); } catch (_) {}
+    try { await navigator.clipboard.writeText(exportLog()); } catch (_) {}
   }
 
   ['log', 'info', 'warn', 'error'].forEach((name) => {
@@ -253,6 +332,6 @@ const String _debugOverlayScript = r'''
   } else {
     ensureUi();
   }
-  append('info', ['Debug console ready']);
+  append('info', ['Good Vibes app controls ready']);
 })();
 ''';
